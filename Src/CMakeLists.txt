@@ -10,7 +10,7 @@ file(GLOB HEADERS *.h *.cuh)
 source_group("Headers" FILES ${HEADERS})
 
 cuda_add_executable(pca
-  ${HEADERS}
+  PCA.h
   PCA.cu
 
   OPTIONS --cudart=shared  -arch sm_50 -use_fast_math
@@ -23,3 +23,7 @@ target_link_libraries(
   ${CUDA_CURAND_LIBRARY}
 )
 
+add_executable(pca_cpu
+  PCA_cpu.h
+  PCA_cpu.cpp
+)

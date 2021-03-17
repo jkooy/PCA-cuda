@@ -162,7 +162,7 @@ int main() {
 	Predict(project_train_img, project_test_img, n_train, n_test, k, predictions);
 
 	WriteFile("test_predictions.txt", n_test, predictions);
-	printf("Predictions are saved in build/Src/test_predictions.txt...\n");
+	printf("Predictions are saved in Src/test_predictions.txt...\n");
 
 	return 0;
 

@@ -10,6 +10,12 @@ int main() {
 	int train_MatBuffer = n_train * dimension * sizeof(int);
 	int test_MatBuffer = n_test * dimension * sizeof(int);
 
+
+	cudaEvent_t start, stop;
+	cudaEventCreate(&start);
+	cudaEventCreate(&stop);
+	cudaEventRecord(start);
+
 	//Read training set
 	printf("Loading train data...\n");
 	train_Mat = (int*)malloc(train_MatBuffer);
@@ -36,7 +42,7 @@ int main() {
 	printf("Calculating principal components for training data...\n");
 	printf("N_PC:%d\n\n", k);
 	//Calculate the mean vector of the training matrix
-	cuda_Mean <<<32, 128 >>>(d_train_Mat, n_train, dimension, d_mean);
+	cuda_Mean << <32, 128 >> > (d_train_Mat, n_train, dimension, d_mean);
 
 	//Compute the difference between each image vector and the mean vector
 	dim3 block1(128, 1);
@@ -44,17 +50,17 @@ int main() {
 	float *d_X;
 	int Xbuffer = n_train * dimension * sizeof(float);
 	cudaMalloc((void**)&d_X, Xbuffer);
-	cuda_SubtractMean << <grid1, block1 >> >(d_train_Mat, d_mean, n_train, dimension, d_X);
+	cuda_SubtractMean << <grid1, block1 >> > (d_train_Mat, d_mean, n_train, dimension, d_X);
 
 	//Determine the covariance matrix
 	int covMatBuffer = dimension * dimension * sizeof(float);
 	float *d_Xt, *d_covMat;
 	cudaMalloc((void**)&d_Xt, Xbuffer);
 	cudaMalloc((void**)&d_covMat, covMatBuffer);
-	cuda_MatTranspose << <grid1, block1 >> >(d_X, d_Xt, n_train, dimension);
+	cuda_MatTranspose << <grid1, block1 >> > (d_X, d_Xt, n_train, dimension);
 	dim3 block2(32, 16);
 	dim3 grid2(dimension / 32, dimension / 16);
-	cuda_MatMul << <grid2, block2 >> >(d_Xt, d_X, d_covMat, dimension, n_train, dimension);
+	cuda_MatMul << <grid2, block2 >> > (d_Xt, d_X, d_covMat, dimension, n_train, dimension);
 
 	//Find eigenvalues and eigenvectors of the covariance matrix
 	float prev_lambda = 0;
@@ -80,27 +86,27 @@ int main() {
 		Q[0] = 1;
 		for (int m = 1; m < dimension; m++) Q[m] = 0;
 		cudaMemcpy(d_Q, Q, imgBuffer, cudaMemcpyHostToDevice);
-		cuda_MatMul << <16, 256 >>>(d_covMat, d_Q, d_Z, dimension, dimension, 1);
+		cuda_MatMul << <16, 256 >> > (d_covMat, d_Q, d_Z, dimension, dimension, 1);
 
 		//Power Method iteration
 		for (int j = 0; j < 1000; j++) {
 			normZ[0] = 0;
 			cudaMemcpy(d_normZ, normZ, normBuffer, cudaMemcpyHostToDevice);
-			cuda_Norm2 << <grid3, block3, sharedMemSize >> >(d_Z, d_normZ, dimension);
+			cuda_Norm2 << <grid3, block3, sharedMemSize >> > (d_Z, d_normZ, dimension);
 			cudaDeviceSynchronize();
 
 			cudaMemcpy(normZ, d_normZ, normBuffer, cudaMemcpyDeviceToHost);
 			normZ[0] = sqrt(normZ[0]);
 			cudaMemcpy(d_normZ, normZ, normBuffer, cudaMemcpyHostToDevice);
-			cuda_Normalize << <grid3, block3, sharedMemSize >> >(d_Z, d_normZ, d_Q, dimension);
+			cuda_Normalize << <grid3, block3, sharedMemSize >> > (d_Z, d_normZ, d_Q, dimension);
 			cudaDeviceSynchronize();
 
-			cuda_MatMul << <16, 256 >> >(d_Q, d_covMat, d_Z, 1, dimension, dimension);
+			cuda_MatMul << <16, 256 >> > (d_Q, d_covMat, d_Z, 1, dimension, dimension);
 			cudaDeviceSynchronize();
 
 			normZ[0] = 0;
 			cudaMemcpy(d_normZ, normZ, normBuffer, cudaMemcpyHostToDevice);
-			cuda_EigenValue << <grid3, block3, sharedMemSize >> >(d_Q, d_Z, d_normZ, dimension);
+			cuda_EigenValue << <grid3, block3, sharedMemSize >> > (d_Q, d_Z, d_normZ, dimension);
 			cudaDeviceSynchronize();
 
 			cudaMemcpy(normZ, d_normZ, normBuffer, cudaMemcpyDeviceToHost);
@@ -118,9 +124,9 @@ int main() {
 		}
 
 		//Calculate the new covariance matrix for the next eigenvalue and eigenvector
-		cuda_MatMul << <grid2, block2 >> >(d_Q, d_Q, d_W, dimension, 1, dimension);
-		cuda_MatMulScalar << <grid2, block2 >> >(d_W, d_W, dimension, dimension, normZ[0]);
-		cuda_MatSub << <grid2, block2 >> >(d_covMat, d_W, d_covMat, dimension, dimension);
+		cuda_MatMul << <grid2, block2 >> > (d_Q, d_Q, d_W, dimension, 1, dimension);
+		cuda_MatMulScalar << <grid2, block2 >> > (d_W, d_W, dimension, dimension, normZ[0]);
+		cuda_MatSub << <grid2, block2 >> > (d_covMat, d_W, d_covMat, dimension, dimension);
 	}
 
 	//Project the training images in the new subspace
@@ -131,20 +137,20 @@ int main() {
 	cudaMalloc((void**)&d_proj_train, projTrainBuffer);
 	cudaMemcpy(d_kEigVec, k_eig_vec, eigVecBuffer, cudaMemcpyHostToDevice);
 	dim3 grid4((k + block2.x - 1) / block2.x, (n_train + block2.y - 1) / block2.y);
-	cuda_MatMul << <grid4, block2 >> >(d_X, d_kEigVec, d_proj_train, n_train, dimension, k);
+	cuda_MatMul << <grid4, block2 >> > (d_X, d_kEigVec, d_proj_train, n_train, dimension, k);
 
 	//Project the test images in the new subspace
 	printf("Projecting test images onto the new subspace...\n\n");
 	float *d_X1;
 	cudaMalloc((void**)&d_X1, test_MatBuffer);
 	dim3 grid5(dimension / 128, n_test);
-	cuda_SubtractMean << <grid5, block1 >> >(d_test_Mat, d_mean, n_test, dimension, d_X1);
+	cuda_SubtractMean << <grid5, block1 >> > (d_test_Mat, d_mean, n_test, dimension, d_X1);
 
 	float *d_proj_test;
 	int projTestBuffer = n_test * k * sizeof(float);
 	cudaMalloc((void**)&d_proj_test, projTestBuffer);
 	dim3 grid6((k + block2.x - 1) / block2.x, (n_test + block2.y - 1) / block2.y);
-	cuda_MatMul << <grid6, block2 >> >(d_X1, d_kEigVec, d_proj_test, n_test, dimension, k);
+	cuda_MatMul << <grid6, block2 >> > (d_X1, d_kEigVec, d_proj_test, n_test, dimension, k);
 
 	//Copy projected training and test matrices from Device to Host
 	printf("Copying projected training and test images from Devive to Host...\n\n");
@@ -162,7 +168,14 @@ int main() {
 	Predict(project_train_img, project_test_img, n_train, n_test, k, predictions);
 
 	WriteFile("test_predictions.txt", n_test, predictions);
-	printf("Predictions are saved in Src/test_predictions.txt...\n");
+	printf("Predictions are saved in build/Src/test_predictions.txt...\n");
+
+	cudaEventRecord(stop);
+	cudaEventSynchronize(stop);
+	float milliseconds = 0;
+	cudaEventElapsedTime(&milliseconds, start, stop);
+
+	printf("the execution time is %f", milliseconds);
 
 	return 0;
 
